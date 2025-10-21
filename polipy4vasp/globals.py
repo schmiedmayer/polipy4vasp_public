@@ -212,10 +212,13 @@ def clebgo(glob,Lmax,lamb):
     for l in range(Lmax+1):
         for m in range(-l,l+1):
             buffer = []
-            a = np.hstack(np.argwhere(buf[0] == l))
-            b = np.hstack(np.argwhere(buf[1] == l))
-            for i, j in enumerate(a):
-                buffer.append([j,b[i]])
+            amask = buf[0] == l
+            bmask = buf[1] == l
+            if np.any(amask):
+                a = np.hstack(np.argwhere(amask))
+                b = np.hstack(np.argwhere(bmask))
+                for i, j in enumerate(a):
+                    buffer.append([j,b[i]])
             ten_lm_to_l.append(buffer)
     for i, lm in enumerate(ten_lm_to_l) :
         len_l = len(lm)
@@ -244,7 +247,7 @@ def clebgo(glob,Lmax,lamb):
     
 
 
-def setup_globals(settings):
+def setup_globals(settings,data):
     r'''
     Sets up all precomputed factros.
     
@@ -252,6 +255,8 @@ def setup_globals(settings):
     ---------
     settings : Setup
         Class containing all the user defined settings for training the MLFF
+     data : Training_Data
+        Contains all vital information from the ML_AB file
     
     Returns
     -------
@@ -263,5 +268,5 @@ def setup_globals(settings):
         Needs to be run before using `get_c` and `get_p` to avoid an Error!
     '''
     glob = setup_scalar_globals(settings.Lmax)
-    if settings.lamb != None : clebgo(glob,settings.Lmax,settings.lamb)
+    if data._ten : clebgo(glob,settings.Lmax,data.Type.lamb)
     return glob

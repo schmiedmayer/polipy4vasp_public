@@ -12,6 +12,7 @@ Nearest neighbor list setup routines (:mod:`polipy4vasp.positions`)
 import numpy as np
 from numpy import ndarray
 from dataclasses import dataclass
+from copy import deepcopy
 
 @dataclass
 class NN_Configuration:
@@ -42,6 +43,7 @@ class NN_Configuration:
     nntype : ndarray
     mult_per_img : bool
     volume: float = None
+    _lattice: ndarray = None
 
 def get_rlattice_and_v(lattice):
     r'''
@@ -188,7 +190,8 @@ def reduce_rij(configuration,vecrij,rij,Rcut,n):
                
 def conf2nn_conf(configuration,Rcut):
     r'''
-    Calculates the nearest neighbors of a given atomic configuration. The nearest neighbors are all atoms :math:`j` which
+    Calculates the nearest neighbors of a given atomic configuration for the case that there are multible
+    periodic images within the cutoff sphere. The nearest neighbors are all atoms :math:`j` which
     are within :math:`R_\text{cut}` around the central atom :math:`ì`.
     
     Arguments
@@ -206,4 +209,211 @@ def conf2nn_conf(configuration,Rcut):
     vecrij, rij, n = get_vecrij(configuration,rlattice,Rcut)
     nn_conf = reduce_rij(configuration,vecrij,rij,Rcut,n)
     nn_conf.volume = v
+    nn_conf._lattice = configuration.lattice
     return nn_conf
+
+def conf2nn_conf_fast(configuration, Rcut):
+    r'''
+    Calculates the nearest neighbors of a given atomic configuration using the minimum image convetion.
+    The nearest neighbors are all atoms :math:`j` which are within :math:`R_\text{cut}` around the
+    central atom :math:`ì`.
+    
+    Arguments
+    ---------
+    configuration : Configuration
+        An atomic configuration
+    Rcut : scalar
+        The cutoff radius :math:`R_\text{cut}`. Default 5 angstrom.
+    Returns
+    -------
+    nn_conf : NN_Configuration
+        Configuration in a nearest neighbor layout
+    '''
+    rlattice, v = get_rlattice_and_v(configuration.lattice)
+    rpos = configuration.atompos @ rlattice.T
+    vecr = (np.mod(rpos[np.newaxis,:] - rpos[:,np.newaxis]+0.5, 1) - 0.5) @ configuration.lattice
+    r = np.linalg.norm(vecr, axis=-1)
+    mask = r <= Rcut
+    np.fill_diagonal(mask, False)
+    nnn = np.sum(mask,axis=1)
+    maxnn = np.max(nnn)
+    nnr = np.full([configuration.natom,maxnn],np.nan)
+    nnvecr = np.full([configuration.natom,maxnn,3],np.nan)
+    nnl = np.full([configuration.natom,maxnn],np.nan,dtype=np.int32)
+    nntype = np.full([configuration.natom,maxnn],np.nan,dtype=np.int32)
+    l = np.arange(configuration.natom)
+    for i, (nn,m) in enumerate(zip(nnn,mask)):
+        nnr[i,:nn] = r[i,m]
+        nnvecr[i,:nn,:] = vecr[i,m,:]
+        nnl[i,:nn] = l[m]
+        nntype[i,:nn] = configuration.atomtype[m]
+    
+    return NN_Configuration(nnn = nnn,
+                            nnl = nnl,
+                            maxnn = maxnn,
+                            nnr = nnr,
+                            nnvecr = nnvecr,
+                            natom = configuration.natom,
+                            maxtype = configuration.maxtype,
+                            centraltype = configuration.atomtype,
+                            nntype = nntype,
+                            mult_per_img = False,
+                            volume = v,
+                            _lattice = configuration.lattice)
+
+def check_mult_per_img(lattice, Rcut):
+    r'''
+    Checks weather multible periodic images are within the cutoff sphere.
+
+    Parameters
+    ----------
+    lattice : ndarray
+        The lattic vectors.
+    Rcut : scalar
+        The cutoff radius :math:`R_\text{cut}`. Default 5 angstrom.
+
+    Returns
+    -------
+    check: bool
+        Returns `True` if multible images are within the cutoff sphere.
+
+    '''
+    
+    cross = np.cross([lattice[0],lattice[0],lattice[1]],
+                     [lattice[1],lattice[1],lattice[2]])
+    V = np.dot(lattice[2], cross[0])
+    norm = np.linalg.norm(cross,axis=-1)
+    return np.any((V/norm) <= 2*Rcut)
+    
+    
+    
+
+def get_nn_conf(configuration,Rcut):
+    r'''
+    Calculates the nearest neighbors of a given atomic configuration. The nearest neighbors are all atoms :math:`j` which
+    are within :math:`R_\text{cut}` around the central atom :math:`ì`.
+    
+    Arguments
+    ---------
+    configuration : Configuration
+        An atomic configuration
+    Rcut : scalar
+        The cutoff radius :math:`R_\text{cut}`. Default 5 angstrom.
+    Returns
+    -------
+    nn_conf : NN_Configuration
+        Configuration in a nearest neighbor layout
+    '''
+    if check_mult_per_img(configuration.lattice, Rcut):
+        return conf2nn_conf(configuration,Rcut)
+    else:
+        return conf2nn_conf_fast(configuration, Rcut)
+
+def reduce_nn_conf(nn_conf,Rcut):
+    r'''
+    Reduces an excisting NN_Configuration to an NN_Configuration with :math:`R_\text{cut}`.
+    
+    Arguments
+    ---------
+    nn_conf : NN_Configuration
+        Configuration in a nearest neighbor layout
+    Rcut : scalar
+        The cutoff radius :math:`R_\text{cut}`.
+    Returns
+    -------
+    nn_conf : NN_Configuration
+        Configuration in a nearest neighbor layout
+    '''
+    mask = nn_conf.nnr < Rcut
+    nnn = np.sum(mask,axis=1)
+    maxnn = np.max(nnn)
+    natom = nn_conf.natom
+    nnr = np.full([natom,maxnn],np.nan)
+    nnvecr = np.full([natom,maxnn,3],np.nan)
+    nnl = np.full([natom,maxnn],np.nan,dtype=np.int32)
+    nntype = np.full([natom,maxnn],np.nan,dtype=np.int32)
+    for i, (nn,m) in enumerate(zip(nnn,mask)):
+        nnr[i,:nn] = nn_conf.nnr[i,m]
+        nnvecr[i,:nn,:] = nn_conf.nnvecr[i,m,:]
+        nnl[i,:nn] = nn_conf.nnl[i,m]
+        nntype[i,:nn] = nn_conf.nntype[i,m]
+    
+    if nn_conf.mult_per_img:
+        mult_per_img = check_mult_per_img(nn_conf._lattice, Rcut)
+    else :
+        mult_per_img = False
+    return NN_Configuration(nnn = nnn,
+                            nnl = nnl,
+                            maxnn = maxnn,
+                            nnr = nnr,
+                            nnvecr = nnvecr,
+                            natom = natom,
+                            maxtype = nn_conf.maxtype,
+                            centraltype = nn_conf.centraltype,
+                            nntype = nntype,
+                            mult_per_img = mult_per_img,
+                            volume = nn_conf.volume)
+
+def get_nn_confs(settings,configuration):
+    r'''
+    Calculates the nearest neighbors of a given atomic configuration. The nearest neighbors are all atoms :math:`j` which
+    are within :math:`R^{(2)}_\text{cut}` and  :math:`R^{(3)}_\text{cut}` for two- and three-body descriptors around 
+    the central atom :math:`ì`.
+
+    Parameters
+    ----------
+    settings : Setup
+        Class containing all the user defined settings for training the MLFF
+    configuration : Configuration
+        An atomic configuration
+
+    Returns
+    -------
+    nn_conf2 : NN_Configuration
+        Configuration in a nearest neighbor layout for the radial descriptor (two-body).
+    nn_conf3 : NN_Configuration
+        Configuration in a nearest neighbor layout for the angular descriptor (three-body).
+
+    '''
+    
+    if settings.Rcut2 > settings.Rcut3:
+        nn_conf2 = get_nn_conf(configuration,settings.Rcut2)
+        nn_conf3 = reduce_nn_conf(nn_conf2,settings.Rcut3)
+    elif settings.Rcut3 > settings.Rcut2:
+        nn_conf3 = get_nn_conf(configuration,settings.Rcut3)
+        nn_conf2 = reduce_nn_conf(nn_conf3,settings.Rcut2)
+    else:
+        nn_conf2 = get_nn_conf(configuration,settings.Rcut2)
+        nn_conf3 = deepcopy(nn_conf2)
+        
+    return nn_conf2, nn_conf3
+
+def LR_nn_conf(conf):
+    # CF
+    r'''
+    Fakes a nearest neighbor configuration to be able to use the existing routines.
+
+    Parameters
+    ----------
+    conf : Configuration
+        An atomic configuration.
+
+    Returns
+    -------
+    NN_Configuration
+        Fake nearest neighbor configuration.
+
+    '''
+    natoms = conf.natom
+    nnn = np.zeros(natoms, dtype = np.int32) + natoms - 1
+    nnl = np.array([np.arange(natoms) for _ in range(natoms)])[~np.eye(natoms, dtype=bool)].reshape(natoms,-1)
+    return NN_Configuration(nnn = nnn,
+                            nnl = nnl,
+                            maxnn = natoms - 1, #no self interaction
+                            nnr = None,
+                            nnvecr =None,
+                            natom = natoms,
+                            maxtype = conf.maxtype,
+                            centraltype = conf.atomtype,
+                            nntype = conf.atomtype[nnl].reshape(natoms,-1),
+                            mult_per_img = None)

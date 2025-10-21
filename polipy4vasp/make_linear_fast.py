@@ -4,7 +4,7 @@
 import numpy as np
 from .tensor_descriptors import ten_dKxdpxdc_predict
 
-def make_fast(settings,lrc,w):
+def make_fast(settings,data,lrc,w):
     r"""
     When using linear Kernels this routine makes the prediction faster by making
     the contrection over the weights bevorehand.
@@ -13,6 +13,8 @@ def make_fast(settings,lrc,w):
     ----------
     settings : Setup
         Class containing all the user defined settings for training the MLFF.
+    data : Training_Data
+        Contains all vital information from the ML_AB file.
     lrc : list
         The local refferenc configurations :math:`\hat{\textbf{X}}_b`.
     w : list
@@ -26,19 +28,17 @@ def make_fast(settings,lrc,w):
         0.
 
     """
-    if settings.lamb == None:
-        lrc = lrc
-        w   = w
-    else:
-        if settings.lamb >= 0 and settings.Zeta == 0:
-            lrc = [np.dot(np.moveaxis(l,(0,1,2),(2,1,0)).reshape(l.shape[2],-1),ww) for l, ww in zip(lrc,w)]
+    if settings.Kernel == 'linear':
+        if data._ten :
+            lrc = [np.dot(np.moveaxis(l[0],(0,1,2),(2,1,0)).reshape(l[0].shape[2],-1),ww) for l, ww in zip(lrc,w)]
             w   = 0
-        if settings.lamb == None and settings.Kernel == 'linear' :
+        else :
             lrc = [np.dot(ww,l) for l, ww in zip(lrc,w)]
             w   = 0
+        
     return lrc,w
         
-def fast_prediction_P(desc,lrc):
+def fast_prediction(desc,lrc,summ):
     r"""
     Fast telsorial prediction for a linear kernel
 
@@ -48,17 +48,22 @@ def fast_prediction_P(desc,lrc):
         Class containing all the user defined settings for training the MLFF.
     lrc : list
         The local refferenc configurations :math:`\hat{\textbf{X}}_b`.
+    summ : bool
+        Calculate sum over atoms.
 
     Returns
     -------
-    P : ndarray
+    T : ndarray
         Predicted tensor.
 
     """
-    P = np.sum([np.dot(np.sum(lc,axis=1),l) for lc, l in zip(desc.lc,lrc)],axis=0)
-    return P
+    if summ:
+        return np.sum([np.dot(np.sum(lc,axis=1),l) for lc, l in zip(desc.lc,lrc)],axis=0)
+    else :
+        return np.hstack([np.dot(lc,l) for lc, l in zip(desc.lc,lrc)])
+    
 
-def fast_prediction_Z(settings,glob,desc,lrc):
+def fast_prediction_grad(settings,glob,desc,lrc):
     r"""
     Fast telsorial derivative prediction for a linear kernel
 
@@ -75,11 +80,11 @@ def fast_prediction_Z(settings,glob,desc,lrc):
 
     Returns
     -------
-    Z : ndarray
+    dT : ndarray
         Derivative of predicted tensor.
 
     """
-    Z = np.zeros((desc.natom,3,2*settings.lamb+1))
-    for J in range(desc.maxtype):
-        Z += ten_dKxdpxdc_predict(settings,glob,desc,lrc[J],J)
-    return Z
+    dT = ten_dKxdpxdc_predict(settings,glob,desc,lrc[0],0)
+    for J in range(1,desc.maxtype):
+        dT += ten_dKxdpxdc_predict(settings,glob,desc,lrc[J],J)
+    return dT

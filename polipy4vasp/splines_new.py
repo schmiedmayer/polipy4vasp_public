@@ -15,7 +15,7 @@ from scipy.optimize import brentq
 from scipy.special import spherical_jn 
 from scipy.special import spherical_in
 
-def cutoff_function(Rcut,r):
+def cutoff_function(r):
     r"""
     This is the cutoff function for :math:`r\leq R_\text{cut}` defined by Behler and Parrinello [#]_ as,
         
@@ -23,8 +23,6 @@ def cutoff_function(Rcut,r):
         
     Arguments
     ---------
-    Rcut : scalar
-        The cutoff radius :math:`R_\text{cut}`
     r    : array_like
         Argument of the cutoff function :math:`r`
         
@@ -37,16 +35,14 @@ def cutoff_function(Rcut,r):
     ----------
     .. [#] https://doi.org/10.1103/PhysRevLett.98.146401
     """
-    return 0.5*(np.cos(np.pi*r/Rcut)+1)
+    return 0.5*(np.cos(np.pi*r)+1)
 
-def get_qnl(Rcut,Nmax,Lmax):
+def get_qnl(Nmax,Lmax):
     r"""
     This routine is used to compute the parameters :math:`q_{nl}`.
     
     Arguments
     ---------
-    Rcut : scalar
-        The cutoff radius :math:`R_\text{cut}`
     Nmax : int, scalar
         Maximal main quantum number :math:`n_\text{max}`
     Lmax : int, scalar
@@ -88,9 +84,9 @@ def get_qnl(Rcut,Nmax,Lmax):
         buf = [brentq(f, x[j], x[j+1]) for j in range(Nmax+Lmax-l)]
         x = np.array(buf)
         qnl.append(x[:Nmax])
-    return np.array(qnl)/Rcut
+    return np.array(qnl)
 
-def radial_basis_function(qnl,Rcut,r):
+def radial_basis_function(qnl,r):
     r"""
     This is the radial basis function for :math:`r\leq R_\text{cut}` defined by the normalized
     spherical Bessel function of the first kind,
@@ -101,8 +97,6 @@ def radial_basis_function(qnl,Rcut,r):
     ---------
     qnl  : array_like
         Parameters :math:`q_nl`
-    Rcut : scalar
-        The cutoff radius :math:`R_\text{cut}`
     r    : array_like
         Argument :math:`r` of the radial basis function
     
@@ -121,7 +115,7 @@ def radial_basis_function(qnl,Rcut,r):
     for l,q in enumerate(qnl):
         # calculating norm
         f = lambda r : spherical_jn(l,q*r)*spherical_jn(l,q*r) *r*r
-        norm = np.sqrt(quad_vec(f,0,Rcut)[0])
+        norm = np.sqrt(quad_vec(f,0,1)[0])
         
         # calculating chi_nl
         chi_nl.append(spherical_jn(l,q*r)/norm)
@@ -185,7 +179,7 @@ def exp_times_bessel(Lmax,SigmaAtom,r,rp):
             f[l,amask] = exprrp * spherical_in(l,rrp[amask])
     return f
 
-def get_hnl(Rcut,SigmaAtom,Nmax,Lmax,r):
+def get_hnl(SigmaAtom,Nmax,Lmax,r):
     r"""
     This function returns an array of all orders :math:`l` up to :math:`l_\text{max}`
     and :math:`n` up to :math:`n_\text{max}` for the function :math:`h_{nl}(r)` defined as
@@ -197,8 +191,6 @@ def get_hnl(Rcut,SigmaAtom,Nmax,Lmax,r):
     
     Arguments
     ---------
-    Rcut      : scalar
-        The cutoff radius :math:`R_\text{cut}`
     SigmaAtom : scalar
         Width of the gaussian distribution :math:`\sigma_\text{atom}`
     Nmax      : int, scalar
@@ -213,13 +205,13 @@ def get_hnl(Rcut,SigmaAtom,Nmax,Lmax,r):
     hnl    : ndarray
         Function :math:`h_{nl}(r)`    
     """
-    qnl = get_qnl(Rcut,Nmax,Lmax)
+    qnl = get_qnl(Nmax,Lmax)
     # set up integrand
     f = lambda rp : (exp_times_bessel(Lmax,SigmaAtom,r,rp)[np.newaxis,:,:]*
-                     radial_basis_function(qnl,Rcut,rp)[:,:,np.newaxis])*rp*rp
+                     radial_basis_function(qnl,rp)[:,:,np.newaxis])*rp*rp
     # performe integration
-    integral = quad_vec(f,0,Rcut)[0]
-    return 4*np.pi*(2*np.pi*SigmaAtom*SigmaAtom)**-1.5*cutoff_function(Rcut,r)*integral
+    integral = quad_vec(f,0,1)[0]
+    return 4*np.pi*(2*np.pi*SigmaAtom*SigmaAtom)**-1.5*cutoff_function(r)*integral
     
 def get_splines(settings,lamb=0,splineDensity = 100):
     r"""
@@ -236,13 +228,15 @@ def get_splines(settings,lamb=0,splineDensity = 100):
     ---------
     settings : Setup
         Class containing all the user defined settings for training the MLFF
+    lamb : int, scalar, optional
+        Order of the tensor :math:`\lambda`. Default 0.
     splineDensity :  int, scalar, optional
         Sets the density of the :math:`r`-grid 
         
     Returns
     -------
-    hnl   : CubicSpline [#]_
-        Cubic spline of :math:`h_{nl}(r)`
+    hnl   : List of CubicSpline [#]_
+        Cubic spline of :math:`h^{(2)}_{n\lambda}(r)` and :math:`h^{(3)}_{nl}(r)`
     
     Examples
     --------
@@ -255,11 +249,11 @@ def get_splines(settings,lamb=0,splineDensity = 100):
     >>> from polipy4vasp.splines import get_splines
     >>> import numpy as np
     >>> import matplotlib.pyplot as plt
-    >>> settings = pp.Setup(Rcut = 5,
-    ...                     Nmax = 8,
-    ...                     Lmax = 4,
+    >>> settings = pp.Setup(Rcut3 = 5,
+    ...                     Nmax3 = 8,
+    ...                     Lmax  = 4,
     ...                     SigmaAtom = 0.4)
-    >>> hnl = get_splines(settings)
+    >>> hnl = get_splines(settings)[1]
     >>> r = np.linspace(0, 5, 50)
     >>> fig, ax = plt.subplots(figsize=(6.5, 4))
     >>> ax.plot(r,hnl(r)[2, 1],label="h")
@@ -278,8 +272,9 @@ def get_splines(settings,lamb=0,splineDensity = 100):
             on docs.scipy.
     """
 
-    rMesh2 = np.linspace(0,settings.Rcut2,splineDensity)
-    hMesh2 = get_hnl(settings.Rcut2,settings.SigmaAtom,settings.Nmax2,lamb,rMesh2)[:,-1]
-    rMesh3 = np.linspace(0,settings.Rcut3,splineDensity)
-    hMesh3 = get_hnl(settings.Rcut3,settings.SigmaAtom,settings.Nmax3,settings.Lmax,rMesh3)
-    return [CubicSpline(rMesh2,hMesh2,axis=1),CubicSpline(rMesh3,hMesh3,axis=2)]
+    Nmax = max([settings.Nmax2,settings.Nmax3])
+    Lmax = max([settings.Lmax,lamb])
+    rMesh = np.linspace(0,1,splineDensity)
+    hMesh = get_hnl(settings.SigmaAtom,Nmax,Lmax,rMesh)
+    return [CubicSpline(settings.Rcut2*rMesh,hMesh[:settings.Nmax2,lamb],axis=1),
+            CubicSpline(settings.Rcut3*rMesh,hMesh[:settings.Nmax3,:settings.Lmax+1],axis=2)]

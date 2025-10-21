@@ -4,7 +4,6 @@
 import numpy as np
 
 from .ML_AB_reader import Configuration
-from .preprocess import conver_conf
          
 def read_POSCAR(filename='POSCAR'):
     r'''
@@ -46,10 +45,10 @@ def read_POSCAR(filename='POSCAR'):
     NType = []
     for I, m in enumerate(NatomType):
         NType.append(np.ones(m,dtype=np.int32)*I)
-    return conver_conf(Configuration(natom = n,
-                                     lattice = np.array([a1,a2,a3]),
-                                     atompos = np.array(Pos),
-                                     atomtype = np.hstack(NType),
-                                     atomname = atomname,
-                                     maxtype = len(atomname),
-                                     sysname = system_name))
+    return Configuration(natom = n,
+                         lattice = np.array([a1,a2,a3]),
+                         atompos = np.array(Pos),
+                         atomtype = np.hstack(NType),
+                         atomname = atomname,
+                         maxtype = len(atomname),
+                         sysname = system_name)

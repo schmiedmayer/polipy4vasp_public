@@ -7,6 +7,30 @@ import numpy as np
 
 from .kernel import K, K_s
 
+def mod_K(x,y,settings):
+    r'''
+    This routine computes the kenel.
+
+    Arguments
+    ---------
+    x : array
+        Local configuration :math:`x`
+    y : array
+        Local configuration :math:`y` 
+    settings : Setup
+        Class containing all the user defined settings for training the MLFF
+
+    Returns
+    -------
+    K : ndarray
+        Kenel.
+
+    '''
+
+    if x.ndim == 1 : x = x[np.newaxis,:]
+    if y.ndim == 1 : y = y[np.newaxis,:]
+    return K(x,y,settings).squeeze()
+
 def K_norm(x,y,settings):
     r'''
     This routine computes the kenel norm defined as:
@@ -29,11 +53,11 @@ def K_norm(x,y,settings):
 
     '''
 
-    Kxy = K(x,y,settings)
+    Kxy = mod_K(x,y,settings)
     if x.ndim == 2: Kxx = K_s(x,settings)
-    else: Kxx = K(x,x,settings)
+    else: Kxx = mod_K(x,x,settings)
     if y.ndim == 2: Kyy = K_s(y,settings)
-    else: Kyy = K(y,y,settings)
+    else: Kyy = mod_K(y,y,settings)
     if Kxy.ndim == 2: norm = Kxx[:,np.newaxis] + Kyy[np.newaxis] - 2*Kxy
     else: norm = Kxx + Kyy - 2*Kxy
     return norm.squeeze()
@@ -58,7 +82,7 @@ def random_lrc(settings, J,lc):
 
     '''
     Nselect = int(settings.NLRC[J])
-    if lc.ndim == 3: lc = lc[0,:,:]
+    if lc.ndim == 3: lc = lc.sum(axis=0)
     size = lc.shape
     buf = np.arange(size[0],dtype=np.int64)
     np.random.shuffle(buf)
@@ -129,9 +153,9 @@ def iter_CUR(settings,J,lc,data):
             return narg[-Nselect:]
     
     Nselect = int(settings.NLRC[J])
-    if lc.ndim == 3: lc = lc[0,:,:]
+    if lc.ndim == 3: lc = lc.sum(axis=0)
     ll  = np.array_split(lc,data.nconf)
-    mat = K(ll[0],ll[0],settings)
+    mat = mod_K(ll[0],ll[0],settings)
     arg =_CUR(mat,settings.EpsCur,Nselect)
     s   = len(ll[0])
     args= np.copy(arg)
@@ -140,7 +164,7 @@ def iter_CUR(settings,J,lc,data):
         args= np.hstack([args,s+np.arange(len(l),dtype=np.int64)])
         s  += len(l)
         l   = np.vstack([lrc,l])
-        mat = K(l,l,settings)
+        mat = mod_K(l,l,settings)
         arg = _CUR(mat,settings.EpsCur,Nselect)
         lrc = l[arg]
         args=args[arg]
@@ -168,7 +192,7 @@ def FPS(settings,J,lc,data):
         Indices of selected local refference configurations
     '''
     
-    if lc.ndim == 3: lc = lc[0,:,:]
+    if lc.ndim == 3: lc = lc.sum(axis=0)
     Nselect = int(settings.NLRC[J])
     args    = [0]
     buf     = K_norm(lc[args[-1]],lc,settings)
@@ -210,7 +234,7 @@ def Kmedian_init(settings,J,lc,data,Nit=25):
     .. [#] https://doi.org/10.1109%2FTIT.1982.1056489
     '''
     
-    if lc.ndim == 3: lc = lc[0,:,:]
+    if lc.ndim == 3: lc = lc.sum(axis=0)
     Nselect = int(settings.NLRC[J])
     out = FPS(settings,J,lc,data)
     m = lc[out]
@@ -254,7 +278,7 @@ def iter_pivot(settings,J,lc,data):
         Indices of selected local refference configurations
     '''
     
-    if lc.ndim == 3: lc = lc[0,:,:]
+    if lc.ndim == 3: lc = lc.sum(axis=0)
     Nselect = int(settings.NLRC[J])
     ll  = np.array_split(lc,data.nconf)
     lrc = ll[0]
@@ -267,7 +291,7 @@ def iter_pivot(settings,J,lc,data):
         if len(l) <= Nselect:
             arg = np.arange(len(l),dtype=np.int64)
         else :
-            mat = K(l,l,settings)
+            mat = mod_K(l,l,settings)
             _, jpvt, _,_= dpstrf(mat)
             arg = jpvt[:Nselect]-1
         lrc = l[arg]
@@ -319,11 +343,11 @@ def get_LRC(settings,descriptors,data):
     nlrc= []
     indx= []
     for J in range(data.maxtype):
-        if settings.lamb == None :
-            lc = np.vstack([des.lc[J] for des in descriptors])
-        else :
-            if settings.Zeta > 1 : llc = np.vstack([des.llc[J] for des in descriptors])
+        if data._ten :
+            if settings.Kernel == "poli" : llc = np.vstack([des.llc[J] for des in descriptors])
             lc = np.concatenate([des.lc[J] for des in descriptors],1)
+        else :
+            lc = np.vstack([des.lc[J] for des in descriptors])
         
         if settings.AlgoLRC == 0:
             #selectes the local refference configurations stored in the ML_AB file
@@ -344,9 +368,9 @@ def get_LRC(settings,descriptors,data):
             #Uses the pivoted Choelesky algorythm
             args = iter_pivot(settings,J,lc,data)
         
-        if settings.lamb == None : lrc.append(lc[args])
-        elif settings.Zeta < 2: lrc.append(lc[:,args])
-        else : lrc.append([lc[:,args],llc[args]])
+        if not data._ten : lrc.append(lc[args])
+        elif settings.Zeta > 1 and settings.Kernel == "poli": lrc.append([lc[:,args],llc[args]])
+        else : lrc.append([lc[:,args]])
         nlrc.append(len(args))
         indx.append(args)
     return lrc, nlrc, indx

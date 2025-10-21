@@ -62,7 +62,7 @@ def get_phi(settings,glob,descriptor,lrc,maxtype,w=None,predict=False):
         return np.concatenate(Ephi,0), -np.concatenate(Fphi,2)
 
 
-def get_PHI(settings,glob,descriptors,lrc,maxtype):
+def get_PHI(settings,glob,descriptors,lrc,maxtype,pre_process_args):
     r'''
     Constructes the desing matrix :math:`\Phi` needed for training.
 
@@ -78,6 +78,8 @@ def get_PHI(settings,glob,descriptors,lrc,maxtype):
         Local refference configuration
     maxtype : int
         Number of different atom types.
+    pre_process_args : tupel
+        Arguments needed for preprocessing
 
     Returns
     -------
@@ -87,6 +89,6 @@ def get_PHI(settings,glob,descriptors,lrc,maxtype):
     '''
     nlrc = sum([len(rc) for rc in lrc])
     buf = Parallel(n_jobs=settings.ncore,require='sharedmem')(delayed(get_phi)(settings,glob,desc,lrc,maxtype) for desc in tqdm(descriptors, desc='Bulding PHI'))
-    EPHI = np.vstack([b[0] for b in buf])
+    EPHI = np.vstack([b[0]/n for b,n in zip(buf,pre_process_args[0])])
     FPHI = np.vstack([b[1].reshape(-1,nlrc) for b in buf])
-    return np.vstack([EPHI*settings.Wene,FPHI*settings.Wforc])
+    return np.vstack([EPHI*pre_process_args[3],FPHI*pre_process_args[4]])

@@ -3,16 +3,18 @@
 
 import polipy4vasp as pp
 
-settings = pp.Setup(Rcut = 5.5,
-                    Nmax = 8,
-                    Wene = 50,
-                    Wforc = 1,
+settings = pp.Setup(Rcut2 = 9,
+                    Rcut3 = 5.5,
+                    Nmax2 = 12,
+                    Nmax3 = 8,
                     Lmax = 4,
-                    Beta = [.2,.8],
+                    Beta = 0.8,
+                    Waderiv=1,
                     SigmaAtom = 0.4,
-                    AlgoLRC = 1,
-                    NLRC= [30],
-                    Validation=0.2)
+                    AlgoLRC = 0,
+                    Validation=0,
+                    ncore=8,
+                    Scatter_Plot=False)
     
 mlff = settings.train('Si_cd_100K-300K/ML_AB')
 mlff.save('ML_FF')

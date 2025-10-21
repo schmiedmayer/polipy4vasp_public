@@ -12,7 +12,6 @@ import numpy as np
 from dataclasses import dataclass
 from copy import deepcopy
 
-from .preprocess import eV_to_AU, eVperAng_to_AU, conver_conf, AU_to_Ang, conver_set
 from .sph import setup_asa
 from .globals import setup_globals
 from .splines import get_splines
@@ -67,14 +66,14 @@ class Configuration:
 
         """
         if si :
-            a = AU_to_Ang(self.lattice[0])
-            b = AU_to_Ang(self.lattice[1])
-            c = AU_to_Ang(self.lattice[2])
-            unit = "Å"
-        else:
             a = self.lattice[0]
             b = self.lattice[1]
             c = self.lattice[2]
+            unit = "Å"
+        else:
+            a = self.lattice[0] * 1.889726125
+            b = self.lattice[1] * 1.889726125
+            c = self.lattice[2] * 1.889726125
             unit = "a_0"
         
         absa = np.linalg.norm(a)
@@ -116,8 +115,8 @@ class Configuration:
         def form(value):
             return "  %12.8f"*3 % (value[0],value[1],value[2])
         
-        latt  = [form(l) for l in AU_to_Ang(self.lattice).tolist()]
-        pos   = [form(p) for p in AU_to_Ang(self.atompos).tolist()]
+        latt  = [form(l) for l in self.lattice.tolist()]
+        pos   = [form(p) for p in self.atompos.tolist()]
         atypeN = [np.sum(self.atomtype == J) for J in range(self.maxtype)] 
         aname = ""
         anum  = ""
@@ -155,6 +154,7 @@ class Training_Data:
         energies (ndarray) : Array containing energies for each configuration
         forces (ndarray) : Array containing forces for each configuration
         stresstensors (ndarray) : Array containing the stress tensors for each configuration
+        atomname (list) : List of strings containing the atom names
         lrc (list) : Local refferenc configurations selected by vasp
     """
     configurations : list
@@ -164,8 +164,9 @@ class Training_Data:
     energies: np.ndarray
     forces: np.ndarray
     stresstensors: np.ndarray
-    atomtypes: np.ndarray
+    atomname: list
     lrc : list
+    _ten : bool = False
     
     def reduce(self,confs,copy=False):
         r"""
@@ -193,7 +194,7 @@ class Training_Data:
         ML_AB.energies = np.array([ML_AB.energies[i] for i in confs])
         ML_AB.forces = [ML_AB.forces[i] for i in confs]
         ML_AB.stresstensors = np.array([ML_AB.stresstensors[i] for i in confs])
-        ML_AB.lrc = [np.array([],dtype=np.int32) for _ in ML_AB.atomtypes]
+        ML_AB.lrc = [np.array([],dtype=np.int32) for _ in ML_AB.atomname]
         if copy :
             return ML_AB
     
@@ -211,19 +212,19 @@ class Training_Data:
         None.
 
         '''
-        conset = conver_set(settings)
+        conset = settings
         setup_asa(conset.Lmax)
         glob = setup_globals(conset)
         h = get_splines(conset)
         l_descriptors = get_AllDescriptors(conset,glob,self.configurations,h)
         _, nlrc, lrc = get_LRC(conset,l_descriptors,self)
-        for J, typ in enumerate(self.atomtypes):
+        for J, typ in enumerate(self.atomname):
                 print(('Selected %4d local refferenc configurations for atom type '+typ+'.') % nlrc[J])
         self.lrc = lrc
     
     def write(self,path='ML_AB_new'):
         r'''
-        Wirtes Training_Data to ML_AB file.
+        Wirtes :meth:`Training_Data <polipy4vasp.ML_AB_reader.Training_Data>` to ML_AB file.
 
         Parameters
         ----------
@@ -253,7 +254,7 @@ class Training_Data:
             for n, conf in enumerate(ML_AB.configurations,start=1):
                 Naprev = 1
                 for J, aname in enumerate(conf.atomname):
-                    JJ = np.argwhere(ML_AB.atomtypes == aname)[0,0]
+                    JJ = np.argwhere(ML_AB.atomname == aname)[0,0]
                     ntype = np.sum(conf.atomtype == J)
                     l2 = np.arange(ntype,dtype=np.int32) + Naprev
                     l1 = np.ones(ntype,dtype=np.int32) * n
@@ -278,7 +279,7 @@ class Training_Data:
             f.write("**************************************************\n")
             f.write("     The atom types in the data file\n")
             f.write("--------------------------------------------------\n")
-            f.write(w_3(self.atomtypes,"%2s"))
+            f.write(w_3(self.atomname,"%2s"))
             f.write("**************************************************\n")
             f.write("     The maximum number of atoms per system\n")
             f.write("--------------------------------------------------\n")
@@ -300,7 +301,7 @@ class Training_Data:
             f.write("--------------------------------------------------\n")
             f.write(w_3([len(lrc) for lrc in self.lrc],"%5i"))
             
-            for J, atn in enumerate(self.atomtypes):
+            for J, atn in enumerate(self.atomname):
                 f.write("**************************************************\n")
                 f.write("     Basis set for %2s\n" % atn)
                 f.write("--------------------------------------------------\n")
@@ -335,19 +336,19 @@ class Training_Data:
                 f.write("==================================================\n")
                 f.write("     Primitive lattice vectors (ang.)\n")
                 f.write("--------------------------------------------------\n")
-                np.savetxt(f, pp.preprocess.AU_to_Ang(conf.lattice), fmt=' %12.8f',delimiter='')
+                np.savetxt(f, conf.lattice, fmt=' %12.8f',delimiter='')
                 f.write("==================================================\n")
                 f.write("     Atomic positions (ang.)\n")
                 f.write("--------------------------------------------------\n")
-                np.savetxt(f, pp.preprocess.AU_to_Ang(conf.atompos), fmt=' %12.8f',delimiter='')
+                np.savetxt(f, conf.atompos, fmt=' %12.8f',delimiter='')
                 f.write("==================================================\n")
                 f.write("     Total energy (eV)\n")
                 f.write("--------------------------------------------------\n")
-                f.write("     %12.8f\n" % pp.preprocess.AU_to_eV(E))
+                f.write("     %12.8f\n" % E)
                 f.write("==================================================\n")
                 f.write("     Forces (eV ang.^-1)\n")
                 f.write("--------------------------------------------------\n")
-                np.savetxt(f, pp.preprocess.AU_to_eVperAng(F), fmt=' %12.8f',delimiter='')
+                np.savetxt(f, F, fmt=' %12.8f',delimiter='')
                 f.write("==================================================\n")
                 f.write("     Stress (kbar)\n")
                 f.write("--------------------------------------------------\n")
@@ -431,13 +432,13 @@ def read_ML_AB(filename='ML_AB'):
         Stress = [[np.float64(f) for f in line[k+38+ConfMaxType+2*Natom].strip().split()]]
         Stress.append([np.float64(f) for f in line[k+42+ConfMaxType+2*Natom].strip().split()])
         StressL.append(np.array(Stress))
-        conf.append(conver_conf(Configuration(natom = Natom,
-                                              lattice = Lattice,
-                                              atompos = AtomPos,
-                                              atomtype = AtomType,
-                                              atomname = AtomName,
-                                              maxtype = ConfMaxType,
-                                              sysname = SysName)))
+        conf.append(Configuration(natom = Natom,
+                                  lattice = Lattice,
+                                  atompos = AtomPos,
+                                  atomtype = AtomType,
+                                  atomname = AtomName,
+                                  maxtype = ConfMaxType,
+                                  sysname = SysName))
         k+=43+ConfMaxType+2*Natom
     NTypeLsum = np.array([[sum(l[:i]) for i in range(len(l))] for l in NTypeL]).T
     NTypeL = np.array(NTypeL).T
@@ -447,8 +448,8 @@ def read_ML_AB(filename='ML_AB'):
             nconf = MaxConf,
             matom = AtomM,
             maxtype = MaxType,
-            energies = eV_to_AU(np.array(TotEneL)),
-            forces = [eVperAng_to_AU(F) for F in ForcL],
+            energies = np.array(TotEneL),
+            forces = [F for F in ForcL],
             stresstensors = np.array(StressL),
-            atomtypes = AtomTypes,
+            atomname = AtomTypes,
             lrc = lrc)

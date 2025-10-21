@@ -10,9 +10,9 @@ XDATCAR file reader routine (:mod:`polipy4vasp.XDATCAR_reader`)
 """
 
 import numpy as np
+from tqdm import tqdm
 
 from polipy4vasp.ML_AB_reader import Configuration
-from polipy4vasp.preprocess import conver_conf
 
 def read_XDATCAR(filename='XDATCAR'):
     r'''
@@ -49,24 +49,24 @@ def read_XDATCAR(filename='XDATCAR'):
         XDATCAR = XDATCAR[7:]
         n = len(XDATCAR)
         POS = np.array_split(XDATCAR, n//(natom+1))
-        for P in POS:
+        for P in tqdm(POS, desc = 'Reading XDATCAR'):
             pos = []
             for p in P[1:]:
                 buf = np.array(p.split(),dtype=np.float64)
                 pos.append(a1*buf[0]+a2*buf[1]+a3*buf[2])
             atompos = np.array(pos)
-            out.append(conver_conf(Configuration(natom = natom,
-                                                 lattice = lattice,
-                                                 atompos = atompos,
-                                                 atomtype = atomtype,
-                                                 atomname = atomname,
-                                                 maxtype = maxtype,
-                                                 sysname = sysname)))
+            out.append(Configuration(natom = natom,
+                                     lattice = lattice,
+                                     atompos = atompos,
+                                     atomtype = atomtype,
+                                     atomname = atomname,
+                                     maxtype = maxtype,
+                                     sysname = sysname))
     # XDATCAR for ISIF==3
     else:
         n = len(XDATCAR)
         POS = np.array_split(XDATCAR, n//(natom+8))
-        for P in POS:
+        for P in tqdm(POS, desc = 'Reading XDATCAR'):
             sysname = P[0].replace('\n','').strip()
             bP = float(P[1])
             a1 = bP*np.array(P[2].split(),dtype=np.float64)
@@ -83,11 +83,11 @@ def read_XDATCAR(filename='XDATCAR'):
                 buf = np.array(p.split(),dtype=np.float64)
                 pos.append(a1*buf[0]+a2*buf[1]+a3*buf[2])
             atompos = np.array(pos)
-            out.append(conver_conf(Configuration(natom = natom,
-                                                 lattice = lattice,
-                                                 atompos = atompos,
-                                                 atomtype = atomtype,
-                                                 atomname = atomname,
-                                                 maxtype = maxtype,
-                                                 sysname = sysname)))
+            out.append(Configuration(natom = natom,
+                                     lattice = lattice,
+                                     atompos = atompos,
+                                     atomtype = atomtype,
+                                     atomname = atomname,
+                                     maxtype = maxtype,
+                                     sysname = sysname))
     return out
